@@ -1,0 +1,17 @@
+# Python virtual environments
+.venv/
+venv/
+venvs/
+
+# Blender project files
+*.blend
+*.blend*
+
+# Python cache files
+__pycache__/
+
+# Python packaging metadata
+*.egg-info/
+
+# 00_dataset folder and its contents
+00_dataset/

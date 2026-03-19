@@ -59,7 +59,7 @@ device = "auto"  # auto | cpu | cuda
 output_root = Path("outputs")
 checkpoint_dir = output_root / "checkpoints"
 figure_dir = output_root / "figures"
-visualize_every = 5
+visualize_every = 10
 
 
 def is_masking_corruption(strategy: str) -> bool:

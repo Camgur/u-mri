@@ -7,6 +7,7 @@ from typing import Iterable
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
 try:
@@ -73,6 +74,64 @@ def split_file_paths(
     train_paths = [file_paths[i] for i in indices[:train_count]]
     val_paths = [file_paths[i] for i in indices[train_count:]]
     return train_paths, val_paths
+
+
+def _pad_last_two_dims(tensor: torch.Tensor, target_h: int, target_w: int) -> torch.Tensor:
+    """Pad tensor on its trailing spatial dims to ``target_h`` and ``target_w``."""
+    h, w = tensor.shape[-2:]
+    pad_h = target_h - h
+    pad_w = target_w - w
+    if pad_h < 0 or pad_w < 0:
+        raise ValueError(f"Cannot pad tensor of shape {tuple(tensor.shape)} to ({target_h}, {target_w}).")
+    if pad_h == 0 and pad_w == 0:
+        return tensor
+    return F.pad(tensor, (0, pad_w, 0, pad_h))
+
+
+def collate_kspace_batch(batch: list[dict]) -> dict:
+    """Pad variable-size k-space samples in a batch and stack them."""
+    if not batch:
+        raise ValueError("Cannot collate an empty batch.")
+
+    max_h = max(int(item["input"].shape[-2]) for item in batch)
+    max_w = max(int(item["input"].shape[-1]) for item in batch)
+    original_hw = torch.tensor(
+        [[int(item["input"].shape[-2]), int(item["input"].shape[-1])] for item in batch],
+        dtype=torch.int64,
+    )
+
+    collated = {
+        "input": torch.stack([_pad_last_two_dims(item["input"], max_h, max_w) for item in batch], dim=0),
+        "target_kspace": torch.stack(
+            [_pad_last_two_dims(item["target_kspace"], max_h, max_w) for item in batch],
+            dim=0,
+        ),
+        "mask": torch.stack([_pad_last_two_dims(item["mask"], max_h, max_w) for item in batch], dim=0),
+        "corrupted_kspace": torch.stack(
+            [_pad_last_two_dims(item["corrupted_kspace"], max_h, max_w) for item in batch],
+            dim=0,
+        ),
+        "scale": torch.stack([item["scale"] for item in batch], dim=0),
+        "path": [item["path"] for item in batch],
+        "corruption_type": [item["corruption_type"] for item in batch],
+        "requires_data_consistency": torch.stack(
+            [item["requires_data_consistency"] for item in batch],
+            dim=0,
+        ),
+        "original_hw": original_hw,
+    }
+
+    if any("noise_map" in item for item in batch):
+        noise_maps = []
+        for item in batch:
+            noise = item.get("noise_map")
+            if noise is None:
+                h, w = int(item["input"].shape[-2]), int(item["input"].shape[-1])
+                noise = torch.zeros((1, h, w), dtype=torch.float32)
+            noise_maps.append(_pad_last_two_dims(noise, max_h, max_w))
+        collated["noise_map"] = torch.stack(noise_maps, dim=0)
+
+    return collated
 
 
 class KSpaceDataset(Dataset):
@@ -209,6 +268,7 @@ def build_dataloaders(
         num_workers=num_workers,
         pin_memory=pin_memory,
         drop_last=False,
+        collate_fn=collate_kspace_batch,
     )
     val_loader = DataLoader(
         val_dataset,
@@ -217,5 +277,6 @@ def build_dataloaders(
         num_workers=num_workers,
         pin_memory=pin_memory,
         drop_last=False,
+        collate_fn=collate_kspace_batch,
     )
     return train_loader, val_loader

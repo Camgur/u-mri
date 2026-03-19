@@ -14,20 +14,13 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, StepLR
 
 # treat the program as a package or as a script depending on how it's run
-try:
-    from . import config
-    from .data_loader import build_dataloaders
-    from .fft import data_consistency
-    from .losses import DualDomainLoss
-    from .model import UNet2D
-    from .visualization import plot_loss_curves, save_reconstruction_figure
-except ImportError:
-    import config
-    from data_loader import build_dataloaders
-    from fft import data_consistency
-    from losses import DualDomainLoss
-    from model import UNet2D
-    from visualization import plot_loss_curves, save_reconstruction_figure
+from . import config
+from .data_loader import build_dataloaders
+from .fft import data_consistency
+from .losses import DualDomainLoss
+from .model import UNet2D
+from .visualization import plot_loss_curves, save_reconstruction_figure
+
 
 
 def set_seed(seed: int) -> None:
@@ -66,6 +59,37 @@ def apply_optional_data_consistency(
     return requires * dc_out + (1.0 - requires) * pred_kspace
 
 
+def compute_batch_loss(
+    criterion: DualDomainLoss,
+    pred_kspace: torch.Tensor,
+    target_kspace: torch.Tensor,
+    original_hw: torch.Tensor | None,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Compute loss, optionally cropping each sample to its original spatial size."""
+    if original_hw is None:
+        loss, metrics = criterion(pred_kspace, target_kspace)
+        return loss, {k: float(v) for k, v in metrics.items()}
+
+    if original_hw.ndim == 1:
+        original_hw = original_hw.unsqueeze(0)
+
+    losses = []
+    metric_totals = {"loss_total": 0.0, "loss_kspace": 0.0, "loss_image": 0.0}
+    for i in range(pred_kspace.shape[0]):
+        h, w = int(original_hw[i, 0].item()), int(original_hw[i, 1].item())
+        sample_pred = pred_kspace[i : i + 1, :, :h, :w]
+        sample_target = target_kspace[i : i + 1, :, :h, :w]
+        sample_loss, sample_metrics = criterion(sample_pred, sample_target)
+        losses.append(sample_loss)
+        for key in metric_totals:
+            metric_totals[key] += float(sample_metrics[key])
+
+    loss = torch.stack(losses).mean()
+    count = float(len(losses))
+    metrics = {k: v / count for k, v in metric_totals.items()}
+    return loss, metrics
+
+
 def run_epoch(
     model: torch.nn.Module,
     loader,
@@ -86,6 +110,7 @@ def run_epoch(
         target_kspace = batch["target_kspace"].to(device, non_blocking=True)
         corrupted_kspace = batch["corrupted_kspace"].to(device, non_blocking=True)
         mask = batch["mask"].to(device, non_blocking=True)
+        original_hw = batch.get("original_hw")
         requires_dc = batch.get("requires_data_consistency")
         if isinstance(requires_dc, torch.Tensor):
             requires_dc = requires_dc.to(device, non_blocking=True)
@@ -96,7 +121,12 @@ def run_epoch(
         with torch.set_grad_enabled(training):
             pred_kspace = model(inputs)
             final_kspace = apply_optional_data_consistency(pred_kspace, corrupted_kspace, mask, requires_dc)
-            loss, metrics = criterion(final_kspace, target_kspace)
+            loss, metrics = compute_batch_loss(
+                criterion=criterion,
+                pred_kspace=final_kspace,
+                target_kspace=target_kspace,
+                original_hw=original_hw,
+            )
 
             if training:
                 loss.backward()
@@ -150,12 +180,23 @@ def save_epoch_visualization(model, val_loader, device: torch.device, epoch: int
 
         pred = model(inputs)
         pred_final = apply_optional_data_consistency(pred, corrupted, mask, requires_dc)
+        original_hw = batch.get("original_hw")
+
+    if isinstance(original_hw, torch.Tensor) and original_hw.shape[0] > 0:
+        h, w = int(original_hw[0, 0].item()), int(original_hw[0, 1].item())
+        corrupted_plot = corrupted[0, :, :h, :w].cpu()
+        pred_plot = pred_final[0, :, :h, :w].cpu()
+        target_plot = batch["target_kspace"][0, :, :h, :w]
+    else:
+        corrupted_plot = corrupted.cpu()
+        pred_plot = pred_final.cpu()
+        target_plot = batch["target_kspace"]
 
     fig_path = config.figure_dir / f"epoch_{epoch:04d}.png"
     save_reconstruction_figure(
-        corrupted_kspace=corrupted.cpu(),
-        predicted_kspace=pred_final.cpu(),
-        target_kspace=batch["target_kspace"],
+        corrupted_kspace=corrupted_plot,
+        predicted_kspace=pred_plot,
+        target_kspace=target_plot,
         save_path=fig_path,
         title=f"Epoch {epoch}",
     )

@@ -2,7 +2,7 @@
 .venv/
 venv/
 venvs/
-
+.venv*/
 # Blender project files
 *.blend
 *.blend*

@@ -229,6 +229,8 @@ def build_dataloaders(
     train_fraction: float | None = None,
     seed: int | None = None,
     pin_memory: bool | None = None,
+    prefetch_factor: int | None = None,
+    persistent_workers: bool | None = None,
 ):
     """Build train/validation dataloaders using values from config by default."""
     data_root = data_root if data_root is not None else config.data_root
@@ -237,6 +239,18 @@ def build_dataloaders(
     train_fraction = train_fraction if train_fraction is not None else config.train_split
     seed = seed if seed is not None else config.seed
     pin_memory = pin_memory if pin_memory is not None else config.pin_memory
+    prefetch_factor = prefetch_factor if prefetch_factor is not None else config.prefetch_factor
+    persistent_workers = (
+        persistent_workers if persistent_workers is not None else config.persistent_workers
+    )
+
+    loader_kwargs = {
+        "num_workers": num_workers,
+        "pin_memory": pin_memory,
+    }
+    if num_workers > 0:
+        loader_kwargs["persistent_workers"] = persistent_workers
+        loader_kwargs["prefetch_factor"] = prefetch_factor
 
     files = discover_npy_files(data_root)
     train_files, val_files = split_file_paths(files, train_fraction=train_fraction, seed=seed)
@@ -265,8 +279,7 @@ def build_dataloaders(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
+        **loader_kwargs,
         drop_last=False,
         collate_fn=collate_kspace_batch,
     )
@@ -274,8 +287,7 @@ def build_dataloaders(
         val_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
+        **loader_kwargs,
         drop_last=False,
         collate_fn=collate_kspace_batch,
     )

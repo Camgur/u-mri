@@ -6,6 +6,7 @@ import argparse
 import json
 import random
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -153,6 +154,30 @@ def save_checkpoint(
     best_val: float,
 ) -> None:
     """Serialize model, optimizer, scheduler, and metric history."""
+
+    def _serialize_config_value(value):
+        """Convert config values into checkpoint-safe primitive structures."""
+        if isinstance(value, (str, int, float, bool, type(None))):
+            return value
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, (list, tuple)):
+            return [_serialize_config_value(item) for item in value]
+        if isinstance(value, set):
+            return sorted(_serialize_config_value(item) for item in value)
+        if isinstance(value, Mapping):
+            return {str(k): _serialize_config_value(v) for k, v in value.items()}
+        return repr(value)
+
+    config_snapshot = {}
+    for key in dir(config):
+        if not key.islower() or key.startswith("_"):
+            continue
+        value = getattr(config, key)
+        if callable(value):
+            continue
+        config_snapshot[key] = _serialize_config_value(value)
+
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "epoch": epoch,
@@ -161,7 +186,7 @@ def save_checkpoint(
         "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
         "history": history,
         "best_val_loss": best_val,
-        "config": {k: getattr(config, k) for k in dir(config) if k.islower() and not k.startswith("_")},
+        "config": config_snapshot,
     }
     torch.save(payload, path)
 

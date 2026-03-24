@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 """Central configuration for the MRI reconstruction package."""
 
@@ -13,9 +14,12 @@ MASKING_CORRUPTIONS = {
 # Data
 data_root = Path("datasets")
 train_split = 0.9
-batch_size = 16
-num_workers = 0
+batch_size = 64
+# Keep a couple CPU cores free so training and the OS stay responsive.
+num_workers = max(2, min(8, (os.cpu_count() or 4) - 2))
 pin_memory = True
+prefetch_factor = 4
+persistent_workers = True
 seed = 42
 
 # Normalization

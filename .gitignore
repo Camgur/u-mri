@@ -15,7 +15,7 @@ __pycache__/
 
 # 00_dataset folder and its contents
 00_dataset/
-
+*_dataset/
 # Training outputs
 outputs/
 

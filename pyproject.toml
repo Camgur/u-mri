@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "u_mri"
+version = "0.1.0"
+description = "MRI reconstruction with a U-Net-based k-space model."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "nmrglue",
+    "matplotlib",
+    "numpy",
+    "torch",
+]
+
+[tool.setuptools]
+packages = ["u_mri"]
+
+[tool.setuptools.package-dir]
+u_mri = "src"
